@@ -9,13 +9,15 @@ from sklearn.linear_model import LinearRegression, Lasso, Ridge
 from sklearn.svm import SVR
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-#  from sklearn.experimental import enable_hist_gradient_boosting
+from sklearn.experimental import enable_hist_gradient_boosting
 from sklearn.ensemble import HistGradientBoostingRegressor
+import joblib
 import matplotlib.pyplot as plt
 
 df = pd.read_csv('dataset.csv', index_col=0)
 df = df.drop('ENERGYSTARScore', axis=1)
 df = df.dropna(axis=0).reset_index(drop=True)
+
 
 cat_attribs = ['BuildingType', 'PrimaryPropertyType', 'PropertyName',
                'CouncilDistrictCode', 'Neighborhood',
@@ -27,6 +29,7 @@ num_attribs = ['YearBuilt', 'NumberofBuildings', 'NumberofFloors',
 
 y_1, y_2 = 'TotalGHGEmissions', 'SiteEnergyUse(kBtu)'
 
+# Création d'un jeu d'entraînement et d'un jeu de test
 train_set, test_set = train_test_split(df, test_size=0.3, random_state=42)
 
 X_train = train_set[cat_attribs + num_attribs]
@@ -37,136 +40,56 @@ loo_encoder = ce.LeaveOneOutEncoder(cols=cat_attribs)
 loo_encoder.fit(X_train, y_train_1)
 X_train = loo_encoder.transform(X_train)
 
-# train set for linear models
+# Standardisation pour les modèles linéaires
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
-X_train_scaled
-
-def display_scores(scores):
-    print("Scores:", scores)
-    print("Moyenne:", scores.mean())
-    print("Ecart-type:", scores.std())
     
-### 1. Regression linéaire
-
-lin_reg = LinearRegression()
-lin_reg.fit(X_train_scaled, y_train_1)    
-y_pred_1 = lin_reg.predict(X_train_scaled)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
-
-# using cross-validation
-scores = cross_val_score(lin_reg, X_train_scaled, y_train_1,
+def get_rmse_on_train_set(model, training_set):
+    model.fit(training_set, y_train_1)    
+    y_pred_1 = model.predict(training_set)
+    mse = mean_squared_error(y_train_1, y_pred_1)
+    rmse = np.sqrt(mse)
+    return rmse
+    
+def get_mean_rmse_on_validation_sets(model, training_set):
+    scores = cross_val_score(model, training_set, y_train_1,
                          scoring="neg_mean_squared_error", cv=5)
-lin_reg_rmse_scores = np.sqrt(-scores)
-display_scores(lin_reg_rmse_scores)
+    lin_reg_rmse_scores = np.sqrt(-scores)
+    return lin_reg_rmse_scores.mean()
+    
+non_tree_based_models = [LinearRegression(), Lasso(), SVR(), 
+                         KNeighborsRegressor()]
 
-### 2. Lasso
+tree_based_models = [RandomForestRegressor(random_state=42), 
+                     GradientBoostingRegressor(random_state=42),
+                     HistGradientBoostingRegressor(random_state=42)]
 
-lasso = Lasso()
-lasso.fit(X_train_scaled, y_train_1)
-y_pred_1 = lasso.predict(X_train_scaled)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
+models = non_tree_based_models + tree_based_models
 
-# using cross-validation
-scores = cross_val_score(lasso, X_train_scaled, y_train_1,
-                         scoring="neg_mean_squared_error", cv=5)
-lasso_rmse_scores = np.sqrt(-scores)
-display_scores(lasso_rmse_scores)
+rmse_train_set, rmse_validation_sets = [], []
 
-### 3. Ridge
+for model in models:    
+    if model in non_tree_based_models:
+        rmse_train_set.append(get_rmse_on_train_set(model, X_train_scaled))
+        rmse_validation_sets.append(
+            get_mean_rmse_on_validation_sets(model, X_train_scaled))
+    else: 
+        rmse_train_set.append(get_rmse_on_train_set(model, X_train))
+        rmse_validation_sets.append(
+            get_mean_rmse_on_validation_sets(model, X_train))
+        
+results = pd.DataFrame(
+    list(zip(models, rmse_train_set, rmse_validation_sets)),
+    columns=['modèles', 'rmse train', 'rmse validation (mean)']
+    ).sort_values('rmse validation (mean)', ascending=True)        
 
-ridge = Ridge()
-ridge.fit(X_train_scaled, y_train_1)
-y_pred_1 = ridge.predict(X_train_scaled)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
-
-scores = cross_val_score(ridge, X_train_scaled, y_train_1,
-                         scoring="neg_mean_squared_error", cv=5)
-ridge_rmse_scores = np.sqrt(-scores)
-display_scores(ridge_rmse_scores)
-
-### 4. SVR
-
-svr = SVR()
-svr.fit(X_train_scaled, y_train_1)
-y_pred_1 = svr.predict(X_train_scaled)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
-# using cross-validation
-scores = cross_val_score(svr, X_train_scaled, y_train_1,
-                         scoring="neg_mean_squared_error", cv=5)
-svr_rmse_scores = np.sqrt(-scores)
-display_scores(svr_rmse_scores)
-
-### 5. KNN
-
-knn_reg = KNeighborsRegressor()
-knn_reg.fit(X_train_scaled, y_train_1)
-y_pred_1 = knn_reg.predict(X_train_scaled)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
-# using cross-validation
-scores = cross_val_score(knn_reg, X_train_scaled, y_train_1,
-                         scoring="neg_mean_squared_error", cv=5)
-knn_rmse_scores = np.sqrt(-scores)
-display_scores(knn_rmse_scores)
-
-### 6. Random Forest
-
-rf = RandomForestRegressor(random_state=42)
-rf.fit(X_train, y_train_1)
-y_pred_1 = rf.predict(X_train)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
-# using cross-validation
-scores = cross_val_score(rf, X_train, y_train_1,
-                         scoring="neg_mean_squared_error", cv=5)
-rf_rmse_scores = np.sqrt(-scores)
-display_scores(rf_rmse_scores)
-
-### 7. Gradient Boosting
-
-gb = GradientBoostingRegressor(random_state=42)
-gb.fit(X_train, y_train_1)
-y_pred_1 = gb.predict(X_train)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
-# using cross-validation
-scores = cross_val_score(gb, X_train, y_train_1,
-                         scoring="neg_mean_squared_error", cv=5)
-gb_rmse_scores = np.sqrt(-scores)
-display_scores(gb_rmse_scores)
-
-### 8. Hist Gradient Boosting
-
-hist_gb = HistGradientBoostingRegressor(random_state=42)
-hist_gb.fit(X_train, y_train_1)
-y_pred_1 = hist_gb.predict(X_train)
-mse = mean_squared_error(y_train_1, y_pred_1)
-rmse = np.sqrt(mse)
-print('RMSE on train set :', rmse)
-# using cross-validation
-scores = cross_val_score(hist_gb, X_train, y_train_1,
-                         scoring="neg_mean_squared_error", cv=5)
-hist_gb_rmse_scores = np.sqrt(-scores)
-display_scores(hist_gb_rmse_scores)
-
+    
 ### Recherche par quadrillage des hyperparamètres du random forest.
 
 param_grid = {
-    'n_estimators': [5, 10, 50, 100, 500],
-    'max_features': [2, 4, 6, 8],
-    'bootstrap':[True, False]
+    'n_estimators': [50, 100, 150, 500],
+    'max_features': [3, 4, 5, 6],
+    'bootstrap':[False]
 }
 
 forest_reg = RandomForestRegressor(random_state=42)
@@ -181,19 +104,25 @@ cvres = grid_search.cv_results_
 cvres_sample = pd.DataFrame({
     'mean_test_score': np.sqrt(-cvres['mean_test_score']),
     'params': cvres['params']})
-cvres_sample = cvres_sample.sort_values('mean_test_score',
+cvres_sample = cvres_sample.sort_values('mean_test_score', 
                                         ascending=True).reset_index(drop=True)
 
+# n_estimators = 100, max_features = 4, bootstrap = False.
+
 feature_importances = grid_search.best_estimator_.feature_importances_
-pd.DataFrame(
-    sorted(zip(feature_importances,list(X_train.columns)), reverse=True)
+feature_imp_df = pd.DataFrame(
+    sorted(zip(feature_importances,list(X_train.columns)), reverse=True),
+    columns=['MDI', 'variable']
     )
 
 best_model = grid_search.best_estimator_
 y_pred_1 = cross_val_predict(best_model, X_train, y_train_1, cv=5)
 y_train_1 = y_train_1.values
 plt.scatter(y_train_1, y_pred_1, alpha=0.5)
-plt.plot(np.linspace(0, 1_400), np.linspace(0, 1_400))
+plt.plot(np.linspace(0, 1_400), np.linspace(0, 1_400), c='red')
 plt.xlabel("valeurs réelles", fontsize=15)
 plt.ylabel("valeurs prédites", fontsize=15)
 plt.show()
+
+# Sauvegarde du meilleur modèle
+joblib.dump(best_model, 'best_model.pkl')
